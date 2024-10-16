@@ -4,14 +4,24 @@
 
 
 ## Prerequisite
-For basic tests: `conda install pytorch==1.13.1 pytorch-cuda=11.7 -c pytorch -c nvidia`
+> Python 3.10.15
+
+For basic tests (matrix mul; MLP): `conda install numpy==1.21.5 pytorch==1.13.1 pytorch-cuda=11.7 -c pytorch -c nvidia`
 
 For CNN test: `conda install torchvision==0.14.1 -c pytorch -c nvidia`
 
 For GNN test: `conda install pyg -c pyg`
 
 ## Usage
-> `usage: gpu_profiling.py [-h] [--device {cpu,gpu,mps,default}] [--tests TESTS [TESTS ...]]`
+```
+usage: gpu_profiling.py [-h] [--device {cpu,gpu,mps,default}] [--tests TESTS [TESTS ...]] [--n_trials N_TRIALS]
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --device {cpu,gpu,mps,default}
+  --tests TESTS [TESTS ...]
+  --n_trials N_TRIALS
+```
 
 ### Example-1: Run all tests on the default device (use GPU when possible)
 

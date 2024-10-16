@@ -1,25 +1,8 @@
 import time
 import argparse
+import numpy as np
 import torch
 import torch.nn as nn
-
-
-parser = argparse.ArgumentParser()
-parser.add_argument("--device", type=str, choices=["cpu", "gpu", "mps", "default"], default="default")
-parser.add_argument("--tests", type=str, nargs="+", default=["mm", "mlp", "cnn", "gnn"])
-args = parser.parse_args()
-
-tt1 = time.time()
-# Check if GPU is available
-if args.device=="mps":
-    device = torch.device("mps")
-elif args.device=="gpu":
-    device = torch.device("cuda")
-elif args.device=="cpu":
-    device = torch.device("cpu")
-else:
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Using device: {device}")
 
 
 def test_mm(device):
@@ -88,13 +71,16 @@ def test_mlp(device):
     model = build_mlp(input_dim, output_dim, [256, 256, 256, 256]).to(device)
     inputs = torch.randn(n_batchsize, input_dim).to(device)
     results_sum = 0
-    
+    if device==torch.device("cuda"):
+        torch.cuda.synchronize()
     for i in range(n_warmup+n_test):
         if i==n_warmup:
             t_start = time.time()
         with torch.no_grad():
             results = model(inputs)
             results_sum = results_sum + results
+    if device==torch.device("cuda"):
+        torch.cuda.synchronize()
     t_end = time.time()
     elapsed_time = t_end - t_start
     # print("mean(results)=",torch.mean(results))
@@ -104,19 +90,23 @@ def test_cnn(device):
     import torchvision.models as models
     torch.manual_seed(1007)
     torch.cuda.manual_seed(1007)
-    n_batchsize = 16
-    n_warmup = 2
-    n_test = 3
+    n_batchsize = 8
+    n_warmup = 5
+    n_test = 10
     
     results_sum = 0
     model = models.resnet18().to(device)
     inputs = torch.randn(n_batchsize, 3, 224, 224).to(device)
+    if device==torch.device("cuda"):
+        torch.cuda.synchronize()
     for i in range(n_warmup+n_test):
         if i==n_warmup:
             t_start = time.time()
         with torch.no_grad():
             results = model(inputs)
             results_sum = results_sum + results
+    if device==torch.device("cuda"):
+        torch.cuda.synchronize()
     t_end = time.time()
     elapsed_time = t_end - t_start
     # print("mean(results)=",torch.mean(results))
@@ -130,11 +120,11 @@ def test_gnn(device):
     torch.manual_seed(1007)
     torch.cuda.manual_seed(1007)
     
-    num_graphs = 4096
+    num_graphs = 2048
     in_channels = 32
     out_channels = 1
-    n_warmup = 2
-    n_test = 3
+    n_warmup = 5
+    n_test = 10
     
     model = Sequential('x, edge_index', [
         (GCNConv(in_channels, 256), 'x, edge_index -> x'),
@@ -153,32 +143,70 @@ def test_gnn(device):
     fake_dataset = FakeDataset(num_graphs=num_graphs, avg_num_nodes=6, avg_degree=3, num_channels=in_channels)
     data = fake_dataset[0:num_graphs]._data.to(device)
     results_sum = 0
+    if device==torch.device("cuda"):
+        torch.cuda.synchronize()
     for i in range(n_warmup+n_test):
         if i==n_warmup:
             t_start = time.time()
         with torch.no_grad():
             results = model(data.x, data.edge_index)
             results_sum = results_sum + results
+    if device==torch.device("cuda"):
+        torch.cuda.synchronize()
     t_end = time.time()
     elapsed_time = t_end - t_start
     # print("mean(results)=",torch.mean(results))
     return elapsed_time, results_sum
 
-runtime_d = {}
 
-for test_mode in args.tests:
-    print(f"Run {test_mode} test...")
-    if test_mode == "mm":
-        runtime_d[test_mode], res = test_mm(device)
-    elif test_mode == "mlp":
-        runtime_d[test_mode], res = test_mlp(device)
-    elif test_mode == "cnn":
-        runtime_d[test_mode], res = test_cnn(device)
-    elif test_mode == "gnn":
-        runtime_d[test_mode], res = test_gnn(device)
+def main():
+    # Check if GPU is available
+    if args.device=="mps":
+        device = torch.device("mps")
+    elif args.device=="gpu":
+        device = torch.device("cuda")
+    elif args.device=="cpu":
+        device = torch.device("cpu")
     else:
-        raise NotImplementedError
-print("-"*20)
-for test_mode in args.tests:
-    print(f"{test_mode:5s}: {runtime_d[test_mode]:.7f} s")
-# print(runtime_d)
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+    runtime_d = {}
+    for test_mode in args.tests:
+        print(f"Run {test_mode} test...")
+        if test_mode == "mm":
+            runtime_d[test_mode], res = test_mm(device)
+        elif test_mode == "mlp":
+            runtime_d[test_mode], res = test_mlp(device)
+        elif test_mode == "cnn":
+            runtime_d[test_mode], res = test_cnn(device)
+        elif test_mode == "gnn":
+            runtime_d[test_mode], res = test_gnn(device)
+        else:
+            raise NotImplementedError
+    print("-"*20)
+    for test_mode in args.tests:
+        print(f"{test_mode:5s}: {runtime_d[test_mode]:.7f} s")
+    return runtime_d
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--device", type=str, choices=["cpu", "gpu", "mps", "default"], default="default")
+    parser.add_argument("--tests", type=str, nargs="+", default=["mm", "mlp", "cnn", "gnn"])
+    parser.add_argument("--n_trials", type=int, default=5) 
+    args = parser.parse_args()
+
+    ttt1=time.time()
+    runtime_d_list={}
+    for trial_i in range(args.n_trials):
+        runtime_d = main()
+        for key in runtime_d:
+            if key not in runtime_d_list:
+                runtime_d_list[key]=[]
+            runtime_d_list[key].append(runtime_d[key])
+    
+    print("="*20)
+    for test_mode in args.tests:
+        print(f"{test_mode:5s}: {np.mean(runtime_d_list[test_mode]):.7f} ± {np.std(runtime_d_list[test_mode]):.7f} s")
+    ttt2=time.time()
+    print("Finished in %.3f seconds"%(ttt2 - ttt1))
